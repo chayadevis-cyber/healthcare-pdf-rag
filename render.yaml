@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: healthcare-pdf-rag
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements-render.txt
+    startCommand: python app.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: RAG_OFFLINE
+        value: "1"
+      - key: GROQ_API_KEY
+        sync: false

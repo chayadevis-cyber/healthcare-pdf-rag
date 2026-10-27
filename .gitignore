@@ -1,0 +1,13 @@
+# Secrets never belong in public repositories
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.git/
+.gradio/
