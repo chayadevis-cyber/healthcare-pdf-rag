@@ -4,6 +4,7 @@ Run locally: python app.py
 Render free: set RAG_OFFLINE=1 to avoid downloading the large embedding model.
 """
 import os
+import time
 from pathlib import Path
 
 import gradio as gr
@@ -20,7 +21,7 @@ ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 CHUNK_SIZE, CHUNK_OVERLAP = 400, 80
-OFFLINE = os.getenv("RAG_OFFLINE", "0") == "1"
+OFFLINE = os.getenv("RAG_OFFLINE", "1") == "1"
 MAX_PDFS, MAX_PDF_MB, MAX_TOTAL_PAGES = 5, 8, 80
 
 EXAMPLES = [
@@ -42,30 +43,25 @@ PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 
-class TfidfSvdEmbeddings(Embeddings):
-    """Small, fully-local, corpus-fitted embedding fallback for free hosting.
+class FastHashEmbeddings(Embeddings):
+    """Fast, lightweight lexical embeddings for small free-tier RAG demos.
 
-    This is not the original sentence-transformer embedding model; ranking may differ.
+    No model download, corpus fitting, or costly SVD on PDF uploads.
+    These are hashing-based vectors, not sentence-transformer embeddings.
     """
-    def __init__(self, corpus, dim=64):
-        from sklearn.feature_extraction.text import TfidfVectorizer
-        from sklearn.decomposition import TruncatedSVD
-        self.vectorizer = TfidfVectorizer(
-            stop_words="english", ngram_range=(1, 2), sublinear_tf=True
-        )
-        matrix = self.vectorizer.fit_transform(corpus)
-        components = min(dim, matrix.shape[0] - 1, matrix.shape[1] - 1)
-        self.svd = (
-            TruncatedSVD(n_components=components, random_state=0).fit(matrix)
-            if components >= 2 else None
+    def __init__(self, dim=512):
+        from sklearn.feature_extraction.text import HashingVectorizer
+        self.vectorizer = HashingVectorizer(
+            n_features=dim,
+            alternate_sign=False,
+            norm="l2",
+            stop_words="english",
+            ngram_range=(1, 2),
+            dtype=np.float32,
         )
 
     def _encode(self, texts):
-        matrix = self.vectorizer.transform(texts)
-        values = self.svd.transform(matrix) if self.svd else matrix.toarray()
-        values = np.asarray(values, dtype="float32")
-        norms = np.linalg.norm(values, axis=1, keepdims=True)
-        return (values / np.maximum(norms, 1e-9)).tolist()
+        return self.vectorizer.transform(texts).toarray().tolist()
 
     def embed_documents(self, texts):
         return self._encode(texts)
@@ -79,7 +75,7 @@ _hf_embeddings = None
 def get_embeddings(chunks):
     global _hf_embeddings
     if OFFLINE:
-        return TfidfSvdEmbeddings([c.page_content for c in chunks])
+        return FastHashEmbeddings()
     if _hf_embeddings is None:
         from langchain_huggingface import HuggingFaceEmbeddings
         _hf_embeddings = HuggingFaceEmbeddings(
@@ -89,15 +85,18 @@ def get_embeddings(chunks):
     return _hf_embeddings
 
 
-def build_index(pdf_paths):
+def build_index(pdf_paths, progress=None):
     """Return (vector_store, summary). No global per-user index is used."""
     if not pdf_paths:
         raise ValueError("Please upload a PDF first.")
     if len(pdf_paths) > MAX_PDFS:
         raise ValueError(f"Upload at most {MAX_PDFS} PDFs at a time.")
 
+    started = time.perf_counter()
+    if progress is not None:
+        progress(0.02, desc="Starting PDF processing")
     docs = []
-    for filename in pdf_paths:
+    for pdf_number, filename in enumerate(pdf_paths, start=1):
         path = Path(getattr(filename, "name", filename))
         if path.suffix.lower() != ".pdf":
             raise ValueError("Only PDF files are supported.")
@@ -106,6 +105,10 @@ def build_index(pdf_paths):
         with path.open("rb") as stream:
             if stream.read(5) != b"%PDF-":
                 raise ValueError("One of the uploaded files is not a valid PDF.")
+        print(f"[RAG] Reading PDF {pdf_number}/{len(pdf_paths)}: {path.name}", flush=True)
+        if progress is not None:
+            progress(0.05 + 0.60 * (pdf_number - 1) / len(pdf_paths),
+                     desc=f"Reading PDF {pdf_number}/{len(pdf_paths)}")
         for page in PyPDFLoader(str(path)).lazy_load():
             if len(docs) >= MAX_TOTAL_PAGES:
                 raise ValueError(f"The combined PDF limit is {MAX_TOTAL_PAGES} pages.")
@@ -114,6 +117,9 @@ def build_index(pdf_paths):
 
     if not docs:
         raise ValueError("The PDFs do not contain any pages.")
+    print(f"[RAG] PDF extraction complete: {len(docs)} pages", flush=True)
+    if progress is not None:
+        progress(0.70, desc="Splitting text into chunks")
     chunks = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
     ).split_documents(docs)
@@ -121,18 +127,26 @@ def build_index(pdf_paths):
     if not chunks:
         raise ValueError("No searchable text found; scanned PDFs may need OCR.")
 
+    print(f"[RAG] Building FAISS search index for {len(chunks)} chunks; "
+          f"RAG_OFFLINE={int(OFFLINE)}", flush=True)
+    if progress is not None:
+        progress(0.82, desc=f"Indexing {len(chunks)} chunks")
     store = FAISS.from_documents(chunks, get_embeddings(chunks))
+    if progress is not None:
+        progress(1.0, desc="Indexing complete")
+    print(f"[RAG] Index complete in {time.perf_counter() - started:.1f}s", flush=True)
     summary = f"Indexed {len(pdf_paths)} PDFs: {len(docs)} pages and {len(chunks)} chunks."
     return store, summary
 
 
-def rebuild_from_upload(files):
+def rebuild_from_upload(files, progress=gr.Progress()):
     """Called from the browser; index lives only in that Gradio session state."""
     if not files:
         return None, "Upload at least one PDF to replace the sample documents."
     try:
-        return build_index(files)
+        return build_index(files, progress=progress)
     except Exception as exc:
+        print(f"[RAG] Indexing error: {type(exc).__name__}: {exc}", flush=True)
         return None, f"Could not index the PDF(s): {exc}"
 
 
@@ -211,7 +225,8 @@ def build_ui():
             upload = gr.File(label="PDF files (max 5, each <= 8 MB)",
                              file_count="multiple", file_types=[".pdf"], type="filepath")
             reindex = gr.Button("Use uploaded PDFs")
-            reindex.click(rebuild_from_upload, upload, [private_store, status])
+            reindex.click(rebuild_from_upload, upload, [private_store, status],
+                      concurrency_limit=1)
         ask_button.click(ask, [question, top_k, use_llm, private_store],
                          [answer, source_chunks])
         question.submit(ask, [question, top_k, use_llm, private_store],
