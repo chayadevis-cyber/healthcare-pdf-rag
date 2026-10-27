@@ -25,7 +25,7 @@ from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parent
 SAMPLES = ROOT / "data"
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 MAX_FILES = 5
 MAX_PER_FILE_MB = 5
 MAX_PAGES = 40
