@@ -29,7 +29,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 load_dotenv()
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 GROQ_TIMEOUT = float(os.getenv("GROQ_TIMEOUT", "20"))
 OFFLINE = os.getenv("RAG_OFFLINE", "0") == "1"
 MAX_PDFS, MAX_PDF_MB, MAX_TOTAL_PAGES = 5, 8, 80
