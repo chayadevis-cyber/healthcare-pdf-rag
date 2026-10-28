@@ -27,6 +27,7 @@ from pypdf import PdfReader
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("agentic-rag")
 
+APP_VERSION = "3.1-progress-502-fix"
 APP_DIR = Path(__file__).resolve().parent
 PDF_PATH = APP_DIR / "trasformer_research_paper-dataset.pdf"
 GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
@@ -36,7 +37,7 @@ JOBS: dict[str, dict] = {}
 ACTIVE = set()
 MAX_JOBS = 40
 
-app = FastAPI(title="Agentic RAG — Lightweight Render Demo", version="2.0")
+app = FastAPI(title="Agentic RAG — Lightweight Render Demo", version=APP_VERSION)
 
 
 class QuestionInput(BaseModel):
@@ -281,7 +282,7 @@ async def handle_question(job_id: str, question: str):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "pdf_found": PDF_PATH.is_file(), "mode": "lightweight"}
+    return {"status": "ok", "pdf_found": PDF_PATH.is_file(), "mode": "lightweight", "version": APP_VERSION}
 
 
 @app.post("/api/ask", status_code=202)
@@ -317,10 +318,10 @@ h1{font-size:28px;margin:0 0 8px}.sub{color:#51657e;margin-top:0;line-height:1.6
 label{font-weight:650;display:block;margin:22px 0 8px}textarea{width:100%;height:125px;border:1px solid #c2cede;border-radius:10px;padding:13px;font:inherit;resize:vertical}
 textarea:focus{border-color:#1464dc;outline:2px solid #b9d6ff}button{background:#155ed4;color:white;font:inherit;font-weight:650;border:0;padding:12px 30px;border-radius:10px;cursor:pointer;margin-top:13px}
 button:disabled{opacity:.55;cursor:not-allowed}.small{color:#607084;font-size:13px}
-#progress{display:none;padding:17px 18px;border:1px solid #dce7f7;background:#f7faff;border-radius:12px;margin-top:22px}
+#progress{display:block;padding:17px 18px;border:1px solid #dce7f7;background:#f7faff;border-radius:12px;margin-top:22px}
 #stageText{font-weight:650}#timer{float:right;font-variant-numeric:tabular-nums;color:#5b6e81}
 .bar{background:#dce6f5;height:8px;border-radius:999px;margin:13px 0 12px;overflow:hidden}
-#barFill{width:10%;height:100%;border-radius:999px;background:#1b66d4;transition:width .5s ease}
+#barFill{width:0%;height:100%;border-radius:999px;background:#1b66d4;transition:width .5s ease}
 .steps{display:flex;justify-content:space-between;color:#62758d;font-size:12px;gap:8px;flex-wrap:wrap}.steps .active{font-weight:700;color:#155ed4}
 #output{display:none;border-top:1px solid #edf1f7;margin-top:23px;padding-top:18px}#answer{white-space:pre-wrap;line-height:1.7;overflow-wrap:anywhere}
 #error{display:none;color:#a02125;background:#fff0f0;padding:12px;border-radius:9px;margin-top:16px;white-space:pre-wrap}
@@ -329,13 +330,14 @@ button:disabled{opacity:.55;cursor:not-allowed}.small{color:#607084;font-size:13
 </style></head>
 <body><main>
 <h1>Agentic RAG — Router / Retriever</h1>
+<p class="small" id="buildVersion">Build v3.1 · Live progress enabled · Lightweight PDF retrieval</p>
 <p class="sub">Ask about the included <strong>Attention Is All You Need</strong> PDF, or ask a question requiring web search. Powered by Groq and a lightweight PDF vector index.</p>
 <form id="askForm"><label for="question">Your question</label>
 <textarea id="question" required minlength="3" maxlength="1500" placeholder="Explain the Encoder and Decoder Stacks from the PDF"></textarea>
 <button id="askButton" type="submit">Ask</button></form>
-<div id="progress" role="status" aria-live="polite"><span id="stageText">Question received…</span><span id="timer">00:00</span>
+<div id="progress" role="status" aria-live="polite"><span id="stageText">Ready — click Ask to start</span><span id="timer">00:00</span>
 <div class="bar"><div id="barFill"></div></div><div class="steps"><span id="s1">1. Routing</span><span id="s2">2. Retrieval</span><span id="s3">3. Answer</span></div>
-<p class="small" id="detail" style="margin-bottom:0">Processing your request…</p></div>
+<p class="small" id="detail" style="margin-bottom:0">Your question will show live stages here: Routing → Retrieval → Answer.</p></div>
 <div id="error" role="alert"></div><section id="output"><div id="route"></div><h2>Answer</h2><div id="answer"></div><div id="sources" class="small"></div></section>
 <p class="small" style="margin-top:30px">Free Render instances may take longer to wake after inactivity. A 502 on the entire page means the server itself is unavailable; check the Render Logs.</p>
 </main>
